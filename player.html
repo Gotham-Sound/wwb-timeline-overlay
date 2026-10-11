@@ -1,0 +1,449 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>WWB Overlay Player</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin: 0; background: #111; color: #ddd; font: 13px/1.4 -apple-system, "Helvetica Neue", Helvetica, Arial, sans-serif; }
+  #bar { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; padding: 8px 12px; background: #1b1b1b; border-bottom: 1px solid #333; }
+  #bar label { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+  #bar input[type=text] { width: 86px; background: #000; color: #eee; border: 1px solid #444; border-radius: 3px; padding: 2px 5px; font: 12px ui-monospace, Menlo, monospace; }
+  #bar input[type=number] { width: 56px; background: #000; color: #eee; border: 1px solid #444; border-radius: 3px; padding: 2px 5px; }
+  #bar input[type=file] { max-width: 180px; font-size: 11px; }
+  #bar .files { display: flex; gap: 12px; }
+  #bar .sep { width: 1px; height: 22px; background: #444; }
+  #stage { position: relative; background: #000; display: flex; justify-content: center; }
+  #v { display: block; width: 100%; height: auto; max-height: calc(100vh - 110px); background: #000; }
+  #c { position: absolute; left: 0; top: 0; pointer-events: none; }
+  #status { padding: 6px 12px; font: 12px ui-monospace, Menlo, monospace; color: #9a9a9a; background: #1b1b1b; border-top: 1px solid #333; display: flex; gap: 18px; flex-wrap: wrap; }
+  #status b { color: #eee; font-weight: 600; }
+  #drop { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.6); color: #fff; font-size: 22px; border: 3px dashed #888; pointer-events: none; }
+  #drop.on { display: flex; }
+  .hint { color: #888; font-size: 12px; }
+  kbd { background: #333; border-radius: 3px; padding: 0 4px; font: 11px ui-monospace, Menlo, monospace; }
+</style>
+</head>
+<body>
+<div id="bar">
+  <div class="files">
+    <label>Video <input type="file" id="fVideo" accept="video/*,.mp4,.mov,.m4v,.webm"></label>
+    <label>Timeline <input type="file" id="fTline" accept=".tline"></label>
+    <label>Show <input type="file" id="fShw" accept=".shw,.xml"></label>
+  </div>
+  <span class="sep"></span>
+  <label title="A moment you can identify in the video">Anchor: video <input type="text" id="anchorVideo" value="4:52.2"></label>
+  <label title="Wall-clock time of that moment, as WWB displays it">= wall <input type="text" id="anchorWall" value="18:30:00.0"></label>
+  <label title="Fine trim in seconds; , and . nudge by 0.1 s">Trim <input type="number" id="trim" step="0.1" value="0"> s</label>
+  <span class="sep"></span>
+  <label><input type="checkbox" id="showIdle"> idle channels</label>
+  <label><input type="checkbox" id="showSpark" checked> history</label>
+  <label>Panel <select id="side"><option value="right">right</option><option value="left">left</option></select></label>
+  <label>Opacity <input type="range" id="opacity" min="0.3" max="1" step="0.05" value="0.85"></label>
+  <label>Size <input type="range" id="scale" min="0.6" max="1.8" step="0.1" value="1"></label>
+  <span class="hint">Drop files anywhere. <kbd>,</kbd> <kbd>.</kbd> trim ±0.1 s, <kbd>space</kbd> play/pause.</span>
+</div>
+<div id="stage">
+  <video id="v" controls playsinline></video>
+  <canvas id="c"></canvas>
+</div>
+<div id="status"><span>Load a video and a .tline file to begin.</span></div>
+<div id="drop">Drop video, .tline and .shw files</div>
+
+<script>
+'use strict';
+// ---------------------------------------------------------------------------
+// .tline decoder (mirrors tline.py; keep the two in step)
+// ---------------------------------------------------------------------------
+const PAYLOAD = 19, NO_TX = 255, HEADER = 43;
+
+function parseTline(buf) {
+  const bytes = new Uint8Array(buf), dv = new DataView(buf);
+  if (bytes[0] !== 0x7a || bytes[1] !== 0xda || bytes[2] !== 0x03) throw new Error('not a .tline file');
+  const offs = [];
+  for (let i = 0; i < 5; i++) offs.push(Number(dv.getBigUint64(3 + 8 * i, true)));
+  // section 0: info + channels
+  const s0 = offs[0];
+  const intervalMs = bytes[s0 + 1];
+  const summaryMs = dv.getUint16(s0 + 2, true);
+  const startMs = Number(dv.getBigUint64(s0 + 4, true));
+  const text = new TextDecoder('latin1').decode(bytes.subarray(s0, offs[1]));
+  const channels = [];
+  const re = /([0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12})\x00([\s\S])([\s\S])([^\x00]*)\x00(\[[^\x00]*\])\x00/g;
+  let m;
+  while ((m = re.exec(text))) {
+    channels.push({ deviceId: m[1], slot: m[2].charCodeAt(0), number: m[3].charCodeAt(0), name: m[4], group: m[5] });
+  }
+  // section 1: frame index
+  const frameCount = Number(dv.getBigUint64(offs[1], true));
+  const frameOffsets = new Uint32Array(frameCount + 1);
+  const frameLengths = new Uint16Array(frameCount);
+  let o = HEADER;
+  for (let i = 0; i < frameCount; i++) {
+    frameOffsets[i] = o;
+    const L = dv.getUint16(offs[1] + 8 + 2 * i, true);
+    frameLengths[i] = L;
+    o += L;
+  }
+  frameOffsets[frameCount] = o;
+  if (o !== offs[0]) throw new Error('frame index does not span data block');
+  // section 3: events
+  const events = [];
+  let pos = offs[3];
+  const n = dv.getUint16(pos, true); pos += 2;
+  const dec = new TextDecoder('latin1');
+  for (let k = 0; k < n; k++) {
+    const t0 = Number(dv.getBigUint64(pos, true)), t1 = Number(dv.getBigUint64(pos + 8, true));
+    pos += 16;
+    const strs = [];
+    for (let j = 0; j < 3; j++) {
+      let e = pos; while (bytes[e] !== 0) e++;
+      strs.push(dec.decode(bytes.subarray(pos, e)));
+      pos = e + 1;
+    }
+    const channel = bytes[pos + 6];
+    pos += 7;
+    events.push({ startMs: t0, endMs: t1 || t0, type: strs[0], channelName: strs[1], description: strs[2], channel });
+  }
+  events.sort((a, b) => a.startMs - b.startMs);
+  const byChannel = new Map();
+  for (const e of events) {
+    if (!byChannel.has(e.channel)) byChannel.set(e.channel, []);
+    byChannel.get(e.channel).push(e);
+  }
+  const t = { bytes, dv, intervalMs, summaryMs, startMs, endMs: startMs + frameCount * intervalMs,
+              frameCount, frameOffsets, frameLengths, channels, events, eventsByChannel: byChannel };
+  t.byNumber = new Map(channels.map(c => [c.number, c]));
+  return t;
+}
+
+// Decode frame i (first payload per channel) into a Map(channelNumber -> sample)
+function frameSamples(t, i, out) {
+  const off = t.frameOffsets[i], len = t.frameLengths[i];
+  const n = t.bytes[off];
+  const per = (len - 1) / n;
+  let pos = off + 1;
+  for (let k = 0; k < n; k++) {
+    const ch = t.bytes[pos], p = pos + 1, dv = t.dv;
+    const q = t.bytes[p + 10];
+    out.set(ch, {
+      ch,
+      a: dv.getInt16(p, true) / 10, b: dv.getInt16(p + 2, true) / 10,
+      audio: dv.getInt16(p + 8, true),
+      quality: q === NO_TX ? null : q,
+      bars: q === NO_TX ? null : t.bytes[p + 11],
+      pct: t.bytes[p + 13] === NO_TX ? null : t.bytes[p + 13],
+      active: q !== NO_TX,
+    });
+    pos += per;
+  }
+  return out;
+}
+
+// max(A,B) RSSI for one channel at frame i (cheap, for history strips)
+function rssiMaxAt(t, i, chNumber) {
+  const off = t.frameOffsets[i], len = t.frameLengths[i];
+  const n = t.bytes[off], per = (len - 1) / n;
+  let pos = off + 1;
+  for (let k = 0; k < n; k++) {
+    if (t.bytes[pos] === chNumber) {
+      const a = t.dv.getInt16(pos + 1, true), b = t.dv.getInt16(pos + 3, true);
+      return Math.max(a, b) / 10;
+    }
+    pos += per;
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// .shw show file (XML): device GUID -> model, band, channels(slot -> name, freq, tx)
+// ---------------------------------------------------------------------------
+function parseShw(xmlText) {
+  const doc = new DOMParser().parseFromString(xmlText, 'application/xml');
+  const devices = new Map();
+  for (const dev of doc.querySelectorAll('inventory > device')) {
+    const txt = (el, tag) => { const n = el.querySelector(':scope > ' + tag); return n ? n.textContent.trim() : ''; };
+    const guid = txt(dev, 'id');
+    const channels = new Map();
+    for (const ch of dev.querySelectorAll(':scope > channel')) {
+      const linked = txt(ch, 'child3_id').toLowerCase();
+      let tx = null;
+      for (let k = 1; k <= 8; k++) {
+        if (linked && txt(ch, `regtx${k}_id`).toLowerCase() === linked) tx = txt(ch, `regtx${k}_name`) || null;
+      }
+      channels.set(parseInt(ch.getAttribute('number'), 10), {
+        name: txt(ch, 'channel_name'), freqKhz: parseInt(txt(ch, 'frequency'), 10) || null,
+        gain: parseInt(txt(ch, 'audio_gain'), 10), tx });
+    }
+    devices.set(guid, { name: txt(dev, 'device_name'), model: txt(dev, 'model'), band: txt(dev, 'band'), channels });
+  }
+  return devices;
+}
+
+// ---------------------------------------------------------------------------
+// state, sync, controls
+// ---------------------------------------------------------------------------
+const $ = id => document.getElementById(id);
+const video = $('v'), canvas = $('c'), ctx = canvas.getContext('2d');
+let tl = null, shw = null, videoName = '', tlineName = '';
+const opts = { anchorVideo: '4:52.2', anchorWall: '18:30:00.0', trim: 0, showIdle: false, showSpark: true, side: 'right', opacity: 0.85, scale: 1 };
+try { Object.assign(opts, JSON.parse(localStorage.getItem('wwb-overlay-opts') || '{}')); } catch (e) {}
+function saveOpts() { try { localStorage.setItem('wwb-overlay-opts', JSON.stringify(opts)); } catch (e) {} }
+
+function parseClock(s) {            // "4:52.2" or "18:30:00.0" -> seconds
+  const parts = String(s).trim().split(':').map(Number);
+  if (parts.some(isNaN) || !parts.length) return NaN;
+  let sec = 0; for (const p of parts) sec = sec * 60 + p;
+  return sec;
+}
+function fmtClock(ms, frac = true) {   // pseudo-UTC ms -> HH:MM:SS.t wall clock
+  const s = ms / 1000, d = Math.floor(s / 86400), r = s - d * 86400;
+  const h = Math.floor(r / 3600), m = Math.floor(r % 3600 / 60), x = r % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${frac ? x.toFixed(1).padStart(4, '0') : String(Math.floor(x)).padStart(2, '0')}`;
+}
+function wallMsAt(videoT) {
+  if (!tl) return NaN;
+  const av = parseClock(opts.anchorVideo), aw = parseClock(opts.anchorWall);
+  if (isNaN(av) || isNaN(aw)) return NaN;
+  const midnight = tl.startMs - (tl.startMs % 86400000);
+  return midnight + aw * 1000 + (videoT - av) * 1000 + opts.trim * 1000;
+}
+
+function bindControls() {
+  $('anchorVideo').value = opts.anchorVideo; $('anchorWall').value = opts.anchorWall; $('trim').value = opts.trim;
+  $('showIdle').checked = opts.showIdle; $('showSpark').checked = opts.showSpark; $('side').value = opts.side;
+  $('opacity').value = opts.opacity; $('scale').value = opts.scale;
+  const upd = () => {
+    opts.anchorVideo = $('anchorVideo').value; opts.anchorWall = $('anchorWall').value; opts.trim = parseFloat($('trim').value) || 0;
+    opts.showIdle = $('showIdle').checked; opts.showSpark = $('showSpark').checked; opts.side = $('side').value;
+    opts.opacity = parseFloat($('opacity').value); opts.scale = parseFloat($('scale').value);
+    saveOpts();
+  };
+  for (const id of ['anchorVideo', 'anchorWall', 'trim', 'showIdle', 'showSpark', 'side', 'opacity', 'scale']) $(id).addEventListener('input', upd);
+  $('fVideo').addEventListener('change', e => e.target.files[0] && loadFile(e.target.files[0]));
+  $('fTline').addEventListener('change', e => e.target.files[0] && loadFile(e.target.files[0]));
+  $('fShw').addEventListener('change', e => e.target.files[0] && loadFile(e.target.files[0]));
+  document.addEventListener('keydown', e => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+    if (e.key === ',') { opts.trim = +(opts.trim - 0.1).toFixed(1); $('trim').value = opts.trim; saveOpts(); }
+    else if (e.key === '.') { opts.trim = +(opts.trim + 0.1).toFixed(1); $('trim').value = opts.trim; saveOpts(); }
+    else if (e.key === ' ') { e.preventDefault(); video.paused ? video.play() : video.pause(); }
+  });
+  const drop = $('drop');
+  let depth = 0;
+  document.addEventListener('dragenter', e => { e.preventDefault(); depth++; drop.classList.add('on'); });
+  document.addEventListener('dragover', e => e.preventDefault());
+  document.addEventListener('dragleave', () => { if (--depth <= 0) { depth = 0; drop.classList.remove('on'); } });
+  document.addEventListener('drop', e => { e.preventDefault(); depth = 0; drop.classList.remove('on'); for (const f of e.dataTransfer.files) loadFile(f); });
+}
+
+async function loadFile(file) {
+  const name = file.name.toLowerCase();
+  if (name.endsWith('.tline')) {
+    tl = parseTline(await file.arrayBuffer()); tlineName = file.name;
+    if (shw) enrich();
+  } else if (name.endsWith('.shw') || name.endsWith('.xml')) {
+    shw = parseShw(await file.text());
+    if (tl) enrich();
+  } else {
+    video.src = URL.createObjectURL(file); videoName = file.name;
+  }
+  status();
+}
+function enrich() {
+  for (const c of tl.channels) {
+    const dev = shw.get(c.deviceId); if (!dev) continue;
+    c.model = dev.model; c.band = dev.band;
+    const ch = dev.channels.get(c.slot + 1);
+    if (ch) { c.freqKhz = ch.freqKhz; c.tx = ch.tx; c.gain = ch.gain; }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// drawing
+// ---------------------------------------------------------------------------
+const samples = new Map();
+function levelColor(dbm) { return dbm > -70 ? '#39d353' : dbm > -85 ? '#f2c94c' : '#ff4d4d'; }
+function audioColor(db) { return db > -6 ? '#ff4d4d' : db > -18 ? '#f2c94c' : '#39d353'; }
+
+function sizeCanvas() {
+  const r = video.getBoundingClientRect(), s = $('stage').getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  canvas.style.left = (r.left - s.left) + 'px'; canvas.style.top = (r.top - s.top) + 'px';
+  canvas.style.width = r.width + 'px'; canvas.style.height = r.height + 'px';
+  if (canvas.width !== Math.round(r.width * dpr) || canvas.height !== Math.round(r.height * dpr)) {
+    canvas.width = Math.round(r.width * dpr); canvas.height = Math.round(r.height * dpr);
+  }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return r;
+}
+
+function loop() { requestAnimationFrame(loop); render(); }
+function render() {
+  const r = sizeCanvas();
+  ctx.clearRect(0, 0, r.width, r.height);
+  if (!tl || !video.src) return;
+  const wall = wallMsAt(video.currentTime);
+  const sc = opts.scale * Math.max(0.5, Math.min(1.6, r.width / 1280));
+  const frame = isNaN(wall) ? null : Math.floor((wall - tl.startMs) / tl.intervalMs);
+  const inRange = frame !== null && frame >= 0 && frame < tl.frameCount;
+
+  const rows = [];
+  if (inRange) {
+    frameSamples(tl, frame, samples);
+    for (const c of [...tl.channels].sort((a, b) => a.number - b.number)) {
+      const s = samples.get(c.number); if (!s) continue;
+      if (s.active || opts.showIdle) rows.push({ c, s });
+    }
+  }
+  // panel geometry
+  const W = 372 * sc, rowH = 38 * sc, pad = 8 * sc, headH = 24 * sc;
+  const H = headH + pad + Math.max(rows.length, inRange ? 1 : 1) * rowH + pad;
+  const x0 = opts.side === 'right' ? r.width - W - 12 : 12, y0 = 12;
+  ctx.globalAlpha = opts.opacity;
+  ctx.fillStyle = '#0b0f14'; roundRect(x0, y0, W, H, 8 * sc); ctx.fill();
+  ctx.globalAlpha = 1;
+  // header
+  ctx.fillStyle = '#e8eef5'; ctx.font = `600 ${13 * sc}px -apple-system, Helvetica, Arial`;
+  ctx.fillText('WIRELESS RF', x0 + pad, y0 + 16 * sc);
+  ctx.font = `${12 * sc}px ui-monospace, Menlo, monospace`; ctx.fillStyle = '#9fb3c8';
+  const clock = isNaN(wall) ? 'set anchor' : fmtClock(wall);
+  ctx.textAlign = 'right'; ctx.fillText(clock, x0 + W - pad, y0 + 16 * sc); ctx.textAlign = 'left';
+  ctx.strokeStyle = 'rgba(255,255,255,.12)'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(x0 + pad, y0 + headH); ctx.lineTo(x0 + W - pad, y0 + headH); ctx.stroke();
+
+  if (!inRange) {
+    ctx.fillStyle = '#8899aa'; ctx.font = `${12 * sc}px -apple-system, Helvetica, Arial`;
+    const msg = isNaN(wall) ? 'Anchor not set' : `No telemetry (recording ${fmtClock(tl.startMs, false)} to ${fmtClock(tl.endMs, false)})`;
+    ctx.fillText(msg, x0 + pad, y0 + headH + pad + 22 * sc);
+    status(wall, frame, 0);
+    return;
+  }
+  if (!rows.length) {
+    ctx.fillStyle = '#8899aa'; ctx.font = `${12 * sc}px -apple-system, Helvetica, Arial`;
+    ctx.fillText('No active transmitters', x0 + pad, y0 + headH + pad + 22 * sc);
+  }
+  let y = y0 + headH + pad;
+  for (const { c, s } of rows) {
+    drawRow(c, s, x0 + pad, y, W - 2 * pad, rowH, sc, wall, frame);
+    y += rowH;
+  }
+  status(wall, frame, rows.filter(r => r.s.active).length);
+}
+
+function activeEvent(chNumber, wall) {
+  const list = tl.eventsByChannel.get(chNumber); if (!list) return null;
+  // events are short (often 100-300 ms); hold each for 600 ms so a dropout is visible on screen
+  for (let i = list.length - 1; i >= 0; i--) {
+    const e = list[i];
+    if (e.startMs > wall + 100) continue;
+    if (wall <= Math.max(e.endMs, e.startMs) + 600) { if (e.type === 'No RF Connection') return e; }
+    if (e.startMs < wall - 5000) break;
+  }
+  return null;
+}
+
+function drawRow(c, s, x, y, w, h, sc, wall, frame) {
+  const dim = !s.active;
+  ctx.globalAlpha = dim ? 0.45 : 1;
+  const ev = s.active ? activeEvent(c.number, wall) : null;
+  if (ev) { ctx.fillStyle = 'rgba(255,60,60,.22)'; roundRect(x - 4 * sc, y + 1, w + 8 * sc, h - 2, 4 * sc); ctx.fill(); }
+  // name + frequency
+  ctx.fillStyle = '#f2f6fa'; ctx.font = `600 ${12.5 * sc}px -apple-system, Helvetica, Arial`;
+  ctx.fillText(c.name, x, y + 14 * sc);
+  ctx.fillStyle = '#8fa3b8'; ctx.font = `${9.5 * sc}px ui-monospace, Menlo, monospace`;
+  const sub = c.freqKhz ? (c.freqKhz / 1000).toFixed(3) + (c.tx ? ' ' + c.tx : '') : (c.tx || c.group);
+  ctx.fillText(sub.length > 13 ? sub.slice(0, 13) : sub, x, y + 27 * sc);
+  // RSSI bars A / B
+  const bx = x + 78 * sc, bw = 82 * sc, bh = 6 * sc;
+  for (const [k, v, yy] of [['A', s.a, y + 6 * sc], ['B', s.b, y + 19 * sc]]) {
+    ctx.fillStyle = '#6b7c8f'; ctx.font = `${9 * sc}px ui-monospace, Menlo, monospace`; ctx.fillText(k, bx - 9 * sc, yy + bh);
+    ctx.fillStyle = 'rgba(255,255,255,.1)'; ctx.fillRect(bx, yy, bw, bh);
+    const f = Math.max(0, Math.min(1, (v + 120) / 100));   // -120 .. -20 dBm
+    ctx.fillStyle = s.active ? levelColor(v) : '#555'; ctx.fillRect(bx, yy, bw * f, bh);
+    ctx.fillStyle = '#c9d6e3'; ctx.textAlign = 'right'; ctx.fillText(v.toFixed(0), bx + bw + 24 * sc, yy + bh); ctx.textAlign = 'left';
+  }
+  // quality pips + battery
+  const qx = x + 200 * sc;
+  for (let i = 0; i < 5; i++) {
+    const on = s.quality !== null && i < s.quality;
+    ctx.fillStyle = on ? (s.quality >= 4 ? '#39d353' : s.quality >= 2 ? '#f2c94c' : '#ff4d4d') : 'rgba(255,255,255,.12)';
+    ctx.fillRect(qx + i * 7 * sc, y + 5 * sc, 5 * sc, 7 * sc);
+  }
+  ctx.fillStyle = 'rgba(255,255,255,.1)'; ctx.fillRect(qx, y + 19 * sc, 34 * sc, 6 * sc);
+  if (s.pct !== null) {
+    ctx.fillStyle = s.pct > 30 ? '#39d353' : s.pct > 15 ? '#f2c94c' : '#ff4d4d'; ctx.fillRect(qx, y + 19 * sc, 34 * sc * s.pct / 100, 6 * sc);
+    ctx.fillStyle = '#c9d6e3'; ctx.font = `${9 * sc}px ui-monospace, Menlo, monospace`; ctx.fillText(s.pct + '%', qx + 37 * sc, y + 25 * sc);
+  }
+  // audio meter (-60 .. 0 dB)
+  const ax = x + 262 * sc, aw = 44 * sc;
+  ctx.fillStyle = 'rgba(255,255,255,.1)'; ctx.fillRect(ax, y + 5 * sc, aw, 20 * sc);
+  if (s.active) {
+    const f = Math.max(0, Math.min(1, (s.audio + 60) / 60));
+    ctx.fillStyle = audioColor(s.audio); ctx.fillRect(ax, y + 5 * sc, aw * f, 20 * sc);
+    ctx.fillStyle = '#6b7c8f'; ctx.font = `${8.5 * sc}px ui-monospace, Menlo, monospace`; ctx.fillText('AUD', ax + 2 * sc, y + 32 * sc);
+  }
+  // history strip: max(A,B) over the last 20 s, with dropout ticks
+  if (opts.showSpark) {
+    const hx = x + 312 * sc, hw = 44 * sc, hy = y + 5 * sc, hh = 20 * sc;
+    ctx.fillStyle = 'rgba(255,255,255,.06)'; ctx.fillRect(hx, hy, hw, hh);
+    const n = 40, span = 200;   // 40 points over 200 frames (20 s)
+    ctx.beginPath(); let started = false;
+    for (let k = 0; k <= n; k++) {
+      const fi = frame - span + Math.round(k * span / n); if (fi < 0) continue;
+      const v = rssiMaxAt(tl, fi, c.number); if (v === null) continue;
+      const px = hx + hw * k / n, py = hy + hh * (1 - Math.max(0, Math.min(1, (v + 120) / 100)));
+      started ? ctx.lineTo(px, py) : ctx.moveTo(px, py); started = true;
+    }
+    ctx.strokeStyle = s.active ? '#9fd3ff' : '#555'; ctx.lineWidth = 1.2 * sc; ctx.stroke();
+    const list = tl.eventsByChannel.get(c.number) || [];
+    const t0 = wall - 20000;
+    for (let i = list.length - 1; i >= 0 && list[i].startMs > t0 - 2000; i--) {
+      const e = list[i]; if (e.type !== 'No RF Connection' || e.startMs > wall) continue;
+      const px = hx + hw * (e.startMs - t0) / 20000;
+      ctx.fillStyle = '#ff4d4d'; ctx.fillRect(px, hy, Math.max(1, hw * Math.max(e.endMs - e.startMs, 100) / 20000), hh);
+    }
+  }
+  if (ev) { ctx.fillStyle = '#ff4d4d'; ctx.font = `700 ${10 * sc}px -apple-system, Helvetica, Arial`; ctx.fillText('RF DROP', x + 78 * sc, y + 35 * sc); }
+  ctx.globalAlpha = 1;
+}
+
+function roundRect(x, y, w, h, r) {
+  ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+}
+
+let lastStatus = '';
+function status(wall, frame, active) {
+  const parts = [];
+  parts.push(`<span>video <b>${videoName || '-'}</b></span>`);
+  if (tl) parts.push(`<span>timeline <b>${tlineName}</b> ${tl.channels.length} ch, ${fmtClock(tl.startMs, false)} to ${fmtClock(tl.endMs, false)}, ${tl.events.length} events</span>`);
+  if (shw) parts.push(`<span>show file <b>loaded</b></span>`);
+  if (wall !== undefined && !isNaN(wall)) parts.push(`<span>wall <b>${fmtClock(wall)}</b> frame <b>${frame}</b> active <b>${active}</b></span>`);
+  const html = parts.join('');
+  if (html !== lastStatus) { $('status').innerHTML = html; lastStatus = html; }
+}
+
+// Optional preset via URL when served over http: player.html?video=data/x.mp4&tline=data/x.tline&shw=data/x.shw
+async function loadFromQuery() {
+  const q = new URLSearchParams(location.search);
+  for (const key of ['tline', 'shw', 'video']) {
+    const url = q.get(key); if (!url) continue;
+    try {
+      if (key === 'video') { video.src = url; videoName = url.split('/').pop(); }
+      else { const res = await fetch(url); if (!res.ok) throw new Error(res.status); loadFile(new File([await res.blob()], url.split('/').pop())); }
+    } catch (e) { console.error('could not load', key, url, e); }
+  }
+  status();
+}
+
+bindControls();
+status();
+loadFromQuery();
+video.addEventListener('seeked', render);
+video.addEventListener('loadeddata', render);
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
