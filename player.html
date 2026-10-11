@@ -426,20 +426,34 @@ function status(wall, frame, active) {
   if (html !== lastStatus) { $('status').innerHTML = html; lastStatus = html; }
 }
 
-// Optional preset via URL when served over http: player.html?video=data/x.mp4&tline=data/x.tline&shw=data/x.shw
-async function loadFromQuery() {
-  const q = new URLSearchParams(location.search);
+// Load by URL: used by the query-string preset (player.html?video=...&tline=...&shw=...) and by the
+// native Mac app, which calls window.wwbLoad({video, tline, shw, videoName, tlineName}) with its own URLs.
+async function loadUrls(spec) {
   for (const key of ['tline', 'shw', 'video']) {
-    const url = q.get(key); if (!url) continue;
+    const url = spec[key]; if (!url) continue;
     try {
-      if (key === 'video') { video.src = url; videoName = url.split('/').pop(); }
-      else { const res = await fetch(url); if (!res.ok) throw new Error(res.status); loadFile(new File([await res.blob()], url.split('/').pop())); }
+      if (key === 'video') { video.src = url; videoName = spec.videoName || decodeURIComponent(url.split('/').pop()); }
+      else {
+        const res = await fetch(url); if (!res.ok) throw new Error(res.status);
+        const name = (key === 'tline' && spec.tlineName) || decodeURIComponent(url.split('/').pop());
+        await loadFile(new File([await res.blob()], name));
+      }
     } catch (e) { console.error('could not load', key, url, e); }
   }
   status();
 }
+window.wwbLoad = loadUrls;
+function loadFromQuery() {
+  const q = new URLSearchParams(location.search);
+  const spec = {}; for (const k of ['video', 'tline', 'shw']) if (q.get(k)) spec[k] = q.get(k);
+  if (Object.keys(spec).length) loadUrls(spec);
+}
 
 bindControls();
+if (window.__wwbApp) {
+  document.querySelector('#bar .files').style.display = 'none';
+  document.querySelector('#bar .hint').innerHTML = 'Drop files on the window or use File &gt; Open. <kbd>,</kbd> <kbd>.</kbd> trim ±0.1 s, <kbd>space</kbd> play/pause.';
+}
 status();
 loadFromQuery();
 video.addEventListener('seeked', render);

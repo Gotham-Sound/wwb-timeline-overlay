@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleName</key>
+	<string>WWB Overlay</string>
+	<key>CFBundleDisplayName</key>
+	<string>WWB Overlay</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.gothamsound.wwb-overlay</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1</string>
+	<key>CFBundleExecutable</key>
+	<string>WWB Overlay</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>13.0</string>
+	<key>NSPrincipalClass</key>
+	<string>NSApplication</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSHumanReadableCopyright</key>
+	<string>Gotham Sound</string>
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Wireless Workbench Timeline</string>
+			<key>CFBundleTypeExtensions</key>
+			<array><string>tline</string></array>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Wireless Workbench Show</string>
+			<key>CFBundleTypeExtensions</key>
+			<array><string>shw</string></array>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Video</string>
+			<key>LSItemContentTypes</key>
+			<array><string>public.movie</string></array>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>None</string>
+		</dict>
+	</array>
+</dict>
+</plist>

@@ -3,12 +3,13 @@
 Overlay Shure Wireless Workbench (WWB) Timeline telemetry on show video, in sync.
 Proof of concept, started 2026-10-11.
 
-Four parts:
+Five parts:
 
 1. `tline.py`: reference decoder for WWB Timeline recorder files (`.tline`). Stdlib only.
 2. `shw.py`: pulls receiver model, band, frequency and linked transmitter per channel out of a WWB show file (`.shw`).
 3. `player.html`: browser player. Drop a video, a `.tline` and optionally a `.shw` on it, set one sync anchor, and a translucent RF dashboard follows the video.
 4. `render.py`: renders that dashboard as an alpha overlay movie for Resolve, or burns it into a preview MP4.
+5. `app/`: a native Mac wrapper around the player and renderer (drop files on the window, File > Render Overlay).
 
 ## Quick start
 
@@ -22,6 +23,16 @@ python3 serve.py
 
 then open `http://127.0.0.1:8765/player.html?video=data/bb.mp4&tline=data/bb.tline&shw=data/bb.shw`.
 `data/` holds symlinks to the real files and is not committed.
+
+## Mac app
+
+`app/` holds a thin native wrapper: a window hosting the player, Finder drag-and-drop and File > Open for the files, and File > Render Overlay, which runs `render.py` with the player's current anchor and shows progress. Build it with:
+
+```bash
+app/build.sh --run
+```
+
+That needs Xcode or the command line tools, and produces `build/WWB Overlay.app` (arm64, ad-hoc signed, so it runs on this Mac without Gatekeeper fuss). Rendering from the app still needs `python3`, Pillow and `ffmpeg` on the machine; the app says so if they're missing. Double-clicking a `.tline` or `.shw` can open the app too.
 
 ## Decoder CLI
 
