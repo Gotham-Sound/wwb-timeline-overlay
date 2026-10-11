@@ -1,7 +1,8 @@
-# wwb-overlay
+# wwb-timeline-overlay
 
-Overlay Shure Wireless Workbench (WWB) Timeline telemetry on show video, in sync.
-Proof of concept, started 2026-10-11.
+Overlay Shure Wireless Workbench (WWB) Timeline telemetry on show video, in sync: a translucent dashboard of every live wireless channel (RSSI per antenna, quality, battery, audio level, RF dropouts) that follows the video, for post-show RF review. Built by [Gotham Sound](https://www.gothamsound.com) for its own shows and shared as is.
+
+It works from the `.tline` recordings WWB already makes. The file format is undocumented, so the decoder here is reverse-engineered; the notes at the top of `tline.py` describe what was verified and what is still a guess. This project is not affiliated with or endorsed by Shure. Wireless Workbench, Axient and ShowLink are Shure trademarks.
 
 Five parts:
 
@@ -100,6 +101,10 @@ Timestamps in the file are local wall-clock time stored as if they were UTC. WWB
 ## Sync
 
 Both sides carry absolute wall-clock anchors: the WWB recording start time, and for a YouTube live stream the live-start timestamp from the metadata. That gets within seconds. The last step is one human-set anchor (a countdown hitting zero, a visible mic switch-on) plus a trim of a few tenths. For the Banana Bowl: the on-screen countdown reaches 0:00 at 4:52.2 into the VOD, which was 18:30:00 wall-clock.
+
+## Contributing recordings
+
+The decoder has been verified on two recordings from AD4Q receivers running WWB 7.9. Recordings from other receivers (ULX-D, SLX-D, Axient analog), other WWB versions, or rigs with ShowLink would make it more robust. A `.tline` plus the matching `.shw` is enough; nothing else from the show is needed. Open an issue or a pull request.
 
 ## Still open
 
