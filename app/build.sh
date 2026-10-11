@@ -8,12 +8,12 @@ APP="build/WWB Overlay.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp app/Info.plist "$APP/Contents/Info.plist"
-cp player.html tline.py shw.py render.py "$APP/Contents/Resources/"
+cp player.html "$APP/Contents/Resources/"
 [ -f app/AppIcon.icns ] && cp app/AppIcon.icns "$APP/Contents/Resources/" || true
 echo "compiling…"
 swiftc -O -swift-version 5 -target arm64-apple-macosx13.0 \
-  -framework Cocoa -framework WebKit -framework UniformTypeIdentifiers \
-  app/main.swift -o "$APP/Contents/MacOS/WWB Overlay"
+  -framework Cocoa -framework WebKit -framework AVFoundation -framework VideoToolbox -framework UniformTypeIdentifiers \
+  app/main.swift app/Timeline.swift app/Panel.swift app/Render.swift -o "$APP/Contents/MacOS/WWB Overlay"
 codesign --force --sign - "$APP" >/dev/null 2>&1 || echo "(ad-hoc codesign skipped)"
 echo "built $APP"
 if [ "${1:-}" = "--run" ]; then open "$APP"; fi

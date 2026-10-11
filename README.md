@@ -9,7 +9,7 @@ Five parts:
 2. `shw.py`: pulls receiver model, band, frequency and linked transmitter per channel out of a WWB show file (`.shw`).
 3. `player.html`: browser player. Drop a video, a `.tline` and optionally a `.shw` on it, set one sync anchor, and a translucent RF dashboard follows the video.
 4. `render.py`: renders that dashboard as an alpha overlay movie for Resolve, or burns it into a preview MP4.
-5. `app/`: a native Mac wrapper around the player and renderer (drop files on the window, File > Render Overlay).
+5. `app/`: a native Mac app around the player with its own renderer (drop files on the window, File > Render Overlay). No Python or ffmpeg needed.
 
 ## Quick start
 
@@ -26,13 +26,22 @@ then open `http://127.0.0.1:8765/player.html?video=data/bb.mp4&tline=data/bb.tli
 
 ## Mac app
 
-`app/` holds a thin native wrapper: a window hosting the player, Finder drag-and-drop and File > Open for the files, and File > Render Overlay, which runs `render.py` with the player's current anchor and shows progress. Build it with:
+`app/` holds a native wrapper: a window hosting the player, Finder drag-and-drop and File > Open for the files, and File > Render Overlay, which renders natively with Core Graphics and AVFoundation (ProRes 4444 with alpha, HEVC with alpha, or a PNG sequence, plus an optional burned-in preview MP4 with the program audio). The app has no dependencies beyond macOS 13: no Python, no ffmpeg. Build it with:
 
 ```bash
 app/build.sh --run
 ```
 
-That needs Xcode or the command line tools, and produces `build/WWB Overlay.app` (arm64, ad-hoc signed, so it runs on this Mac without Gatekeeper fuss). Rendering from the app still needs `python3`, Pillow and `ffmpeg` on the machine; the app says so if they're missing. Double-clicking a `.tline` or `.shw` can open the app too.
+That needs Xcode or the command line tools and produces `build/WWB Overlay.app` (arm64, ad-hoc signed). Double-clicking a `.tline` or `.shw` opens the app. The binary doubles as a command-line renderer:
+
+```bash
+"build/WWB Overlay.app/Contents/MacOS/WWB Overlay" --render --tline data/bb.tline --shw data/bb.shw \
+    --start 2:35:53 --duration 120 --codec prores --out out/overlay.mov --burn-in data/bb.mp4
+```
+
+Flags mirror `render.py`. On an M1 Max the native path renders 1080p ProRes 4444 plus the burned-in preview at roughly 80 frames per second end to end. ProRes 4444 is about 8 MB per second; HEVC with alpha is under 100 KB per second for a mostly transparent frame and is accepted by Resolve and Final Cut, but check your NLE version before relying on it.
+
+The decoder, panel and writer live in `app/Timeline.swift`, `app/Panel.swift` and `app/Render.swift`; keep the panel geometry in step with `player.html` and `render.py`.
 
 ## Decoder CLI
 
@@ -66,7 +75,7 @@ Speed and size on an M-series Mac at 1080p: about 90 frames per second, so a 4 h
 
 ## What the Timeline records
 
-Per channel, every 100 ms: RSSI for antennas A to D (tenths of a dBm), audio level (dB, 0 = clip), channel quality 0 to 5, battery bars 0 to 5, battery percent, receiver slot. Every 4 s the frame also carries the min and max per antenna for the window. A separate event log holds RF dropouts ("No RF Connection"), transmitter on/off, RF power and FD mode changes, each with start and end times to the millisecond. The file layout is documented at the top of `tline.py`.
+Per channel, every 100 ms: RSSI for antennas A to D (tenths of a dBm), audio level (dB, 0 = clip), channel quality 0 to 5, battery bars 0 to 5, battery percent, receiver slot, the receiver's RF level meter 0 to 5, and the ShowLink signal 0 to 5 when an access point is present. Every 4 s the frame also carries the min and max per antenna for the window. A separate event log holds RF dropouts ("No RF Connection"), transmitter on/off, RF power and FD mode changes, each with start and end times to the millisecond. The file layout is documented at the top of `tline.py`.
 
 Timestamps in the file are local wall-clock time stored as if they were UTC. WWB labels them "UTC" in its own display. The tools here treat them as wall-clock and never convert time zones.
 
@@ -76,6 +85,6 @@ Both sides carry absolute wall-clock anchors: the WWB recording start time, and 
 
 ## Still open
 
-- Payload byte 16 is undecoded (moves in steps of 4 while a transmitter is on; probably the front-panel audio LED level). A short calibration recording with a transmitter at known gain and battery would settle it.
+- Payload bytes 14, 15, 17 and 18 only carry data when a ShowLink access point is present; their meaning (transmitter gain, offset, RF power index) is a guess from one recording.
 - "Interference" events from the WWB UI have not been seen in a file yet.
 - Future shows: the receivers can stream the same metering over Shure's TCP command protocol with real timestamps, which would make the `.tline` decoder a fallback rather than the main path.

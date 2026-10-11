@@ -4,7 +4,8 @@
 // - Files dropped on the window (or picked via File > Open) are handed to the page by path:
 //   the video as a file:// URL (the web view has read access), the .tline and .shw through a
 //   custom "wwb://file/..." scheme served by this app with byte-range support.
-// - File > Render Overlay runs render.py with the page's current sync anchor and options.
+// - File > Render Overlay renders natively (Panel.swift + Render.swift) with the page's current
+//   sync anchor and options. "WWB Overlay" --render ... does the same from the command line.
 //
 // Built by app/build.sh with swiftc; no Xcode project needed.
 
@@ -14,7 +15,6 @@ import UniformTypeIdentifiers
 
 let appName = "WWB Overlay"
 let schemeName = "wwb"
-let toolPath = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 
 // MARK: - custom scheme: wwb://app/<bundle resource>  and  wwb://file/<absolute path>
 
@@ -134,7 +134,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
     var window: NSWindow!
     var webView: DropWebView!
     var files: [String: URL] = [:]           // "video", "tline", "shw"
-    var renderProcess: Process?
+    var renderer: Renderer?
     var progressPanel: NSPanel?
     var progressLabel: NSTextField?
 
@@ -253,7 +253,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
         let sizeField = NSTextField(string: "1920x1080")
         let fpsField = NSTextField(string: "29.97")
         let codec = NSPopUpButton(frame: .zero, pullsDown: false)
-        codec.addItems(withTitles: ["QuickTime Animation (alpha, small)", "ProRes 4444 (alpha)", "PNG sequence (alpha)"])
+        codec.addItems(withTitles: ["ProRes 4444 (alpha)", "HEVC (alpha, smaller files)", "PNG sequence (alpha)"])
         let burn = NSButton(checkboxWithTitle: "Also make a burned-in preview MP4", target: nil, action: nil)
         burn.state = files["video"] != nil ? .on : .off
         burn.isEnabled = files["video"] != nil
@@ -280,10 +280,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
         a.window.initialFirstResponder = startField
         guard a.runModal() == .alertFirstButtonReturn else { return }
 
-        let codecArg = ["qtrle", "prores", "png"][codec.indexOfSelectedItem]
+        let codecArg: OverlayCodec = [.prores, .hevc, .png][codec.indexOfSelectedItem]
         let wantBurn = burn.state == .on && files["video"] != nil
         let base = tline.deletingPathExtension().lastPathComponent + "_overlay"
-        if codecArg == "png" {
+        if codecArg == .png {
             let p = NSOpenPanel(); p.canChooseDirectories = true; p.canChooseFiles = false; p.canCreateDirectories = true
             p.prompt = "Render Here"; p.message = "Choose a folder for the PNG sequence"
             guard p.runModal() == .OK, let dir = p.url else { return }
@@ -298,71 +298,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
         }
     }
 
-    func run(tline: URL, opts: [String: Any], start: String, dur: String, size: String, fps: String, codec: String, out: URL, burn: Bool) {
-        guard let script = Bundle.main.path(forResource: "render", ofType: "py") else { alert("render.py missing from bundle"); return }
-        guard let python = Self.find("python3") else {
-            alert("python3 was not found. Install the Xcode command line tools (xcode-select --install) or Homebrew Python."); return
-        }
-        if Self.find("ffmpeg") == nil {
-            alert("ffmpeg was not found. Install it with Homebrew:  brew install ffmpeg"); return
-        }
-        var args = [script, "--tline", tline.path, "--start", start, "--duration", dur, "--size", size, "--fps", fps,
-                    "--codec", codec, "--out", out.path]
-        if let s = files["shw"] { args += ["--shw", s.path] }
-        if let v = opts["anchorVideo"] as? String { args += ["--anchor-video", v] }
-        if let w = opts["anchorWall"] as? String { args += ["--anchor-wall", w] }
-        if let tr = opts["trim"] { args += ["--trim", "\(tr)"] }
-        if let sc = opts["scale"] { args += ["--scale", "\(sc)"] }
-        if let op = opts["opacity"] { args += ["--opacity", "\(op)"] }
-        if let side = opts["side"] as? String { args += ["--side", side] }
-        if (opts["showIdle"] as? Bool) == true { args.append("--show-idle") }
-        if (opts["showSpark"] as? Bool) == false { args.append("--no-history") }
+    func run(tline: URL, opts: [String: Any], start: String, dur: String, size: String, fps: String, codec: OverlayCodec, out: URL, burn: Bool) {
+        var job = RenderJob(tlineURL: tline, start: WallClock.parseVideoTime(start) ?? 0, duration: Double(dur) ?? 60, out: out)
+        job.shwURL = files["shw"]
+        if let v = opts["anchorVideo"] as? String { job.anchorVideo = WallClock.parseVideoTime(v) ?? job.anchorVideo }
+        if let w = opts["anchorWall"] as? String { job.anchorWall = w }
+        if let t = opts["trim"] as? NSNumber { job.trim = t.doubleValue }
+        let dims = size.lowercased().split(separator: "x")
+        if dims.count == 2, let w = Int(dims[0]), let h = Int(dims[1]) { job.width = w; job.height = h }
+        (job.fpsNum, job.fpsDen) = RenderCLI.fps(fps)
+        job.codec = codec
+        if let sc = opts["scale"] as? NSNumber { job.options.scale = sc.doubleValue }
+        if let op = opts["opacity"] as? NSNumber { job.options.opacity = op.doubleValue }
+        if let side = opts["side"] as? String { job.options.side = side }
+        job.options.showIdle = (opts["showIdle"] as? Bool) == true
+        job.options.history = (opts["showSpark"] as? Bool) != false
         if burn, let v = files["video"] {
-            args += ["--burn-in", v.path, "--burn-out", out.deletingPathExtension().path + "_preview.mp4"]
+            job.burnIn = v
+            job.burnOut = out.deletingPathExtension().appendingPathExtension("preview.mp4")
         }
-
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: python)
-        p.arguments = args
-        var env = ProcessInfo.processInfo.environment
-        env["PATH"] = toolPath + ":" + (env["PATH"] ?? "")
-        env["PYTHONUNBUFFERED"] = "1"
-        p.environment = env
-        let outPipe = Pipe(), errPipe = Pipe()
-        p.standardOutput = outPipe; p.standardError = errPipe
-        var errText = ""
-        var lastLine = ""
-        outPipe.fileHandleForReading.readabilityHandler = { [weak self] h in
-            let d = h.availableData
-            guard !d.isEmpty, let s = String(data: d, encoding: .utf8) else { return }
-            let pieces = s.split(whereSeparator: { $0 == "\r" || $0 == "\n" })
-            if let last = pieces.last { lastLine = String(last) }
-            DispatchQueue.main.async { self?.progressLabel?.stringValue = lastLine }
-        }
-        errPipe.fileHandleForReading.readabilityHandler = { h in
-            if let s = String(data: h.availableData, encoding: .utf8) { errText += s }
-        }
-        p.terminationHandler = { [weak self] proc in
-            outPipe.fileHandleForReading.readabilityHandler = nil
-            errPipe.fileHandleForReading.readabilityHandler = nil
+        let renderer = Renderer()
+        self.renderer = renderer
+        showProgress(title: "Rendering " + out.lastPathComponent)
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            var failure: Error?
+            do {
+                try renderer.run(job) { msg in DispatchQueue.main.async { self?.progressLabel?.stringValue = msg } }
+            } catch { failure = error }
             DispatchQueue.main.async {
                 guard let self = self else { return }
-                self.progressPanel?.close(); self.progressPanel = nil; self.renderProcess = nil
-                if proc.terminationStatus == 0 {
+                self.progressPanel?.close(); self.progressPanel = nil; self.renderer = nil
+                if let f = failure {
+                    if case RenderError.cancelled = f { return }
+                    self.alert("Render failed: \(f.localizedDescription)")
+                } else {
                     let a = NSAlert(); a.messageText = "Render finished"
                     a.informativeText = out.path
                     a.addButton(withTitle: "Reveal in Finder"); a.addButton(withTitle: "OK")
                     if a.runModal() == .alertFirstButtonReturn { NSWorkspace.shared.activateFileViewerSelecting([out]) }
-                } else if proc.terminationReason == .uncaughtSignal {
-                    // cancelled
-                } else {
-                    self.alert("Render failed (exit \(proc.terminationStatus)).\n\n" + String(errText.suffix(1500)))
                 }
             }
         }
-        do { try p.run() } catch { alert("Could not start render: \(error.localizedDescription)"); return }
-        renderProcess = p
-        showProgress(title: "Rendering " + out.lastPathComponent)
     }
 
     func showProgress(title: String) {
@@ -381,16 +357,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
         progressPanel = panel; progressLabel = label
     }
 
-    @objc func cancelRender(_ sender: Any?) { renderProcess?.terminate() }
+    @objc func cancelRender(_ sender: Any?) { renderer?.cancelled = true }
 
     // --- helpers
-    static func find(_ tool: String) -> String? {
-        for dir in toolPath.split(separator: ":") {
-            let p = "\(dir)/\(tool)"
-            if FileManager.default.isExecutableFile(atPath: p) { return p }
-        }
-        return nil
-    }
 
     static func fmtTime(_ t: Double) -> String {
         let h = Int(t) / 3600, m = (Int(t) % 3600) / 60, s = t - Double(h * 3600 + m * 60)
@@ -437,6 +406,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
         NSApp.windowsMenu = windowMenu
         NSApp.mainMenu = main
     }
+}
+
+if CommandLine.arguments.contains("--render") {
+    exit(RenderCLI.main(CommandLine.arguments))
 }
 
 let app = NSApplication.shared
