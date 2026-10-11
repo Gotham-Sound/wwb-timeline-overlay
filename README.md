@@ -41,13 +41,7 @@ app/release.sh                # universal binary, Developer ID + hardened runtim
 app/release.sh --no-notarize  # sign only
 ```
 
-It signs with the Gotham Sound Developer ID from the keychain and writes `build/WWB Overlay.zip`. Notarization needs a one-time credential in the keychain (an app-specific password from appleid.apple.com, never stored in the repo):
-
-```bash
-xcrun notarytool store-credentials wwb-notary --apple-id <your apple id> --team-id LP4782R87F
-```
-
-Signing is done on a staged copy in `/tmp` because a synced Documents folder keeps re-adding Finder metadata that codesign rejects. The binary doubles as a command-line renderer:
+It signs with the Gotham Sound Developer ID from the keychain, notarizes through the `gotham-notary-org` notarytool profile already on this Mac (an App Store Connect API key; pass `PROFILE=` for another), staples the ticket, and writes `build/WWB Overlay.zip` plus `build/WWB Overlay (notarized).app`. Signing is done on a staged copy in `/tmp` because a synced Documents folder keeps re-adding Finder metadata that codesign rejects. The binary doubles as a command-line renderer:
 
 ```bash
 "build/WWB Overlay.app/Contents/MacOS/WWB Overlay" --render --tline data/bb.tline --shw data/bb.shw \

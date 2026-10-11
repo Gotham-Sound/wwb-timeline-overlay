@@ -4,15 +4,14 @@
 #   app/release.sh                 # build, sign, notarize, staple -> build/WWB Overlay.zip
 #   app/release.sh --no-notarize   # build and sign only
 #
-# One-time setup for notarization (stores an app-specific password from appleid.apple.com in your
-# keychain; nothing is written to this repo):
-#   xcrun notarytool store-credentials wwb-notary --apple-id <your apple id> --team-id LP4782R87F
-#
-# Override the identity or profile with IDENTITY=... PROFILE=... in the environment.
+# Notarization uses a notarytool keychain profile. This Mac already has "gotham-notary-org" for team
+# LP4782R87F (an App Store Connect API key). On another machine, store one once with
+#   xcrun notarytool store-credentials <name> --key AuthKey.p8 --key-id <id> --issuer <issuer>
+# and pass PROFILE=<name>. Override the identity with IDENTITY=... in the environment.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 IDENTITY="${IDENTITY:-Developer ID Application: Gotham Sound and Communications, Inc. (LP4782R87F)}"
-PROFILE="${PROFILE:-wwb-notary}"
+PROFILE="${PROFILE:-gotham-notary-org}"
 BUILT="build/WWB Overlay.app"
 ZIP="build/WWB Overlay.zip"
 # Sign a staged copy in a temp dir OUTSIDE this folder: a synced Documents tree (iCloud, Drive) keeps
@@ -31,8 +30,7 @@ rm -f "$ZIP"; ditto -c -k --keepParent "$APP" "$ZIP"
 if [ "${1:-}" = "--no-notarize" ]; then echo "signed, not notarized: $ZIP"; exit 0; fi
 
 if ! xcrun notarytool history --keychain-profile "$PROFILE" >/dev/null 2>&1; then
-  echo "No notarization profile '$PROFILE' in the keychain. Create it once with:"
-  echo "  xcrun notarytool store-credentials $PROFILE --apple-id <your apple id> --team-id LP4782R87F"
+  echo "No notarization profile '$PROFILE' in the keychain. Store one with xcrun notarytool store-credentials (see the header of this script)"
   echo "then run app/release.sh again. The signed (unnotarized) build is at: $ZIP"
   exit 2
 fi
