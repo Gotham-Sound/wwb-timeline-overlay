@@ -140,7 +140,7 @@ class PanelRenderer:
                     if c:
                         rows.append((c, s))
             rows.sort(key=lambda r: r[0].number)
-        W = int(372 * sc)
+        W = int(432 * sc)
         row_h, pad, head_h = 38 * sc, 8 * sc, 24 * sc
         H = int(head_h + pad + max(len(rows), 1) * row_h + pad)
         margin = int(12 * sc)
@@ -212,8 +212,22 @@ class PanelRenderer:
             col = GREEN if s.battery_pct > 30 else YELLOW if s.battery_pct > 15 else RED
             d.rectangle((qx, y + 19 * sc, qx + 34 * sc * s.battery_pct / 100, y + 25 * sc), fill=col)
             d.text((qx + 37 * sc, y + 25 * sc), f"{s.battery_pct}%", font=font("mono", 9 * sc), fill=VALUE, anchor="ls")
+        # RF meter bars (receiver's own 0..5 meter) and ShowLink pips
+        mx = x + 266 * sc
+        d.text((mx, y + 12 * sc), "RF", font=font("mono", 8.5 * sc), fill=DIMTEXT, anchor="ls")
+        for i in range(5):
+            on = s.rf_bars is not None and i < s.rf_bars
+            col = (GREEN if s.rf_bars >= 4 else YELLOW if s.rf_bars >= 2 else RED) if on else (255, 255, 255, 30)
+            px = mx + 14 * sc + i * 7 * sc
+            d.rectangle((px, y + 5 * sc, px + 5 * sc, y + 12 * sc), fill=col)
+        has_sl = s.showlink is not None
+        d.text((mx, y + 25 * sc), "SL", font=font("mono", 8.5 * sc), fill=DIMTEXT if has_sl else (255, 255, 255, 60), anchor="ls")
+        for i in range(5):
+            on = has_sl and i < s.showlink
+            px = mx + 14 * sc + i * 7 * sc
+            d.rectangle((px, y + 18 * sc, px + 5 * sc, y + 25 * sc), fill=rgba("9fd3ff") if on else (255, 255, 255, 30 if has_sl else 14))
         # audio meter
-        ax, aw = x + 262 * sc, 44 * sc
+        ax, aw = x + 322 * sc, 44 * sc
         d.rectangle((ax, y + 5 * sc, ax + aw, y + 25 * sc), fill=TRACK)
         if s.active:
             f = max(0.0, min(1.0, (s.audio_db + 60) / 60))
@@ -222,7 +236,7 @@ class PanelRenderer:
             d.text((ax + 2 * sc, y + 32 * sc), "AUD", font=font("mono", 8.5 * sc), fill=DIMTEXT, anchor="ls")
         # history strip: max(A,B) over the last 20 s with dropout ticks
         if self.history:
-            hx, hw, hy, hh = x + 312 * sc, 44 * sc, y + 5 * sc, 20 * sc
+            hx, hw, hy, hh = x + 372 * sc, 44 * sc, y + 5 * sc, 20 * sc
             d.rectangle((hx, hy, hx + hw, hy + hh), fill=STRIP_BG)
             n, span = 40, 200
             pts = []

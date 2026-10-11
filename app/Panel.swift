@@ -41,7 +41,7 @@ final class PanelRenderer {
 
     /// Size of the panel for a given number of rows.
     func panelSize(rows: Int) -> CGSize {
-        let W = 372 * sc, rowH = 38 * sc, pad = 8 * sc, headH = 24 * sc
+        let W = 432 * sc, rowH = 38 * sc, pad = 8 * sc, headH = 24 * sc
         return CGSize(width: W, height: headH + pad + CGFloat(max(rows, 1)) * rowH + pad)
     }
 
@@ -138,8 +138,23 @@ final class PanelRenderer {
             fill(ctx, CGRect(x: qx, y: y + 19 * sc, width: 34 * sc * CGFloat(pct) / 100, height: 6 * sc), col)
             text(ctx, "\(pct)%", x: qx + 37 * sc, baseline: y + 25 * sc, font: mono(9 * sc), color: Self.value)
         }
+        // RF meter bars (receiver's own 0..5 meter) and ShowLink pips
+        let mx = x + 266 * sc
+        text(ctx, "RF", x: mx, baseline: y + 12 * sc, font: mono(8.5 * sc), color: Self.dimtext)
+        for i in 0..<5 {
+            let on = s.rfBars != nil && i < s.rfBars!
+            let col = on ? (s.rfBars! >= 4 ? Self.green : s.rfBars! >= 2 ? Self.yellow : Self.red) : NSColor(white: 1, alpha: 0.12)
+            fill(ctx, CGRect(x: mx + 14 * sc + CGFloat(i) * 7 * sc, y: y + 5 * sc, width: 5 * sc, height: 7 * sc), col)
+        }
+        let hasSL = s.showLink != nil
+        text(ctx, "SL", x: mx, baseline: y + 25 * sc, font: mono(8.5 * sc), color: hasSL ? Self.dimtext : NSColor(white: 1, alpha: 0.25))
+        for i in 0..<5 {
+            let on = hasSL && i < s.showLink!
+            let col = on ? Self.trace : NSColor(white: 1, alpha: hasSL ? 0.12 : 0.06)
+            fill(ctx, CGRect(x: mx + 14 * sc + CGFloat(i) * 7 * sc, y: y + 18 * sc, width: 5 * sc, height: 7 * sc), col)
+        }
         // audio meter
-        let ax = x + 262 * sc, aw = 44 * sc
+        let ax = x + 322 * sc, aw = 44 * sc
         fill(ctx, CGRect(x: ax, y: y + 5 * sc, width: aw, height: 20 * sc), Self.track)
         if s.active {
             let f = max(0, min(1, (Double(s.audioDb) + 60) / 60))
@@ -148,7 +163,7 @@ final class PanelRenderer {
         }
         // history strip
         if opt.history {
-            let hx = x + 312 * sc, hw = 44 * sc, hy = y + 5 * sc, hh = 20 * sc
+            let hx = x + 372 * sc, hw = 44 * sc, hy = y + 5 * sc, hh = 20 * sc
             fill(ctx, CGRect(x: hx, y: hy, width: hw, height: hh), Self.stripBg)
             let n = 40, span = 200
             let path = CGMutablePath(); var started = false

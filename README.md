@@ -32,14 +32,29 @@ then open `http://127.0.0.1:8765/player.html?video=data/bb.mp4&tline=data/bb.tli
 app/build.sh --run
 ```
 
-That needs Xcode or the command line tools and produces `build/WWB Overlay.app` (arm64, ad-hoc signed). Double-clicking a `.tline` or `.shw` opens the app. The binary doubles as a command-line renderer:
+That needs Xcode or the command line tools and produces `build/WWB Overlay.app` (arm64, ad-hoc signed, fine for this Mac). Double-clicking a `.tline` or `.shw` opens the app.
+
+For a build that runs on other Macs, including Intel ones, use the release script:
+
+```bash
+app/release.sh                # universal binary, Developer ID + hardened runtime, notarize, staple
+app/release.sh --no-notarize  # sign only
+```
+
+It signs with the Gotham Sound Developer ID from the keychain and writes `build/WWB Overlay.zip`. Notarization needs a one-time credential in the keychain (an app-specific password from appleid.apple.com, never stored in the repo):
+
+```bash
+xcrun notarytool store-credentials wwb-notary --apple-id <your apple id> --team-id LP4782R87F
+```
+
+Signing is done on a staged copy in `/tmp` because a synced Documents folder keeps re-adding Finder metadata that codesign rejects. The binary doubles as a command-line renderer:
 
 ```bash
 "build/WWB Overlay.app/Contents/MacOS/WWB Overlay" --render --tline data/bb.tline --shw data/bb.shw \
     --start 2:35:53 --duration 120 --codec prores --out out/overlay.mov --burn-in data/bb.mp4
 ```
 
-Flags mirror `render.py`. On an M1 Max the native path renders 1080p ProRes 4444 plus the burned-in preview at roughly 80 frames per second end to end. ProRes 4444 is about 8 MB per second; HEVC with alpha is under 100 KB per second for a mostly transparent frame and is accepted by Resolve and Final Cut, but check your NLE version before relying on it.
+Flags mirror `render.py`. The dashboard rows show, per channel: RSSI A and B, channel quality pips, battery, the receiver's own RF meter pips ("RF"), ShowLink pips ("SL", dimmed when the rig has no access point), the audio meter, and a 20 s RSSI history with dropouts in red. On an M1 Max the native path renders 1080p ProRes 4444 plus the burned-in preview at roughly 80 frames per second end to end. ProRes 4444 is about 8 MB per second; HEVC with alpha is under 100 KB per second for a mostly transparent frame and is accepted by Resolve and Final Cut, but check your NLE version before relying on it.
 
 The decoder, panel and writer live in `app/Timeline.swift`, `app/Panel.swift` and `app/Render.swift`; keep the panel geometry in step with `player.html` and `render.py`.
 

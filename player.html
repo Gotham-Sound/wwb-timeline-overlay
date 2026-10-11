@@ -300,7 +300,7 @@ function render() {
     }
   }
   // panel geometry
-  const W = 372 * sc, rowH = 38 * sc, pad = 8 * sc, headH = 24 * sc;
+  const W = 432 * sc, rowH = 38 * sc, pad = 8 * sc, headH = 24 * sc;
   const H = headH + pad + Math.max(rows.length, inRange ? 1 : 1) * rowH + pad;
   const x0 = opts.side === 'right' ? r.width - W - 12 : 12, y0 = 12;
   ctx.globalAlpha = opts.opacity;
@@ -378,8 +378,23 @@ function drawRow(c, s, x, y, w, h, sc, wall, frame) {
     ctx.fillStyle = s.pct > 30 ? '#39d353' : s.pct > 15 ? '#f2c94c' : '#ff4d4d'; ctx.fillRect(qx, y + 19 * sc, 34 * sc * s.pct / 100, 6 * sc);
     ctx.fillStyle = '#c9d6e3'; ctx.font = `${9 * sc}px ui-monospace, Menlo, monospace`; ctx.fillText(s.pct + '%', qx + 37 * sc, y + 25 * sc);
   }
+  // RF meter bars (receiver's own 0..5 meter) and ShowLink pips
+  const mx = x + 266 * sc;
+  ctx.fillStyle = '#6b7c8f'; ctx.font = `${8.5 * sc}px ui-monospace, Menlo, monospace`; ctx.fillText('RF', mx, y + 12 * sc);
+  for (let i = 0; i < 5; i++) {
+    const on = s.rfBars !== null && i < s.rfBars;
+    ctx.fillStyle = on ? (s.rfBars >= 4 ? '#39d353' : s.rfBars >= 2 ? '#f2c94c' : '#ff4d4d') : 'rgba(255,255,255,.12)';
+    ctx.fillRect(mx + 14 * sc + i * 7 * sc, y + 5 * sc, 5 * sc, 7 * sc);
+  }
+  const hasSL = s.showLink !== null;
+  ctx.fillStyle = hasSL ? '#6b7c8f' : 'rgba(255,255,255,.25)'; ctx.fillText('SL', mx, y + 25 * sc);
+  for (let i = 0; i < 5; i++) {
+    const on = hasSL && i < s.showLink;
+    ctx.fillStyle = on ? '#9fd3ff' : (hasSL ? 'rgba(255,255,255,.12)' : 'rgba(255,255,255,.06)');
+    ctx.fillRect(mx + 14 * sc + i * 7 * sc, y + 18 * sc, 5 * sc, 7 * sc);
+  }
   // audio meter (-60 .. 0 dB)
-  const ax = x + 262 * sc, aw = 44 * sc;
+  const ax = x + 322 * sc, aw = 44 * sc;
   ctx.fillStyle = 'rgba(255,255,255,.1)'; ctx.fillRect(ax, y + 5 * sc, aw, 20 * sc);
   if (s.active) {
     const f = Math.max(0, Math.min(1, (s.audio + 60) / 60));
@@ -388,7 +403,7 @@ function drawRow(c, s, x, y, w, h, sc, wall, frame) {
   }
   // history strip: max(A,B) over the last 20 s, with dropout ticks
   if (opts.showSpark) {
-    const hx = x + 312 * sc, hw = 44 * sc, hy = y + 5 * sc, hh = 20 * sc;
+    const hx = x + 372 * sc, hw = 44 * sc, hy = y + 5 * sc, hh = 20 * sc;
     ctx.fillStyle = 'rgba(255,255,255,.06)'; ctx.fillRect(hx, hy, hw, hh);
     const n = 40, span = 200;   // 40 points over 200 frames (20 s)
     ctx.beginPath(); let started = false;
