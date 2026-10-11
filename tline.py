@@ -235,6 +235,19 @@ class Timeline:
         for i in range(start, stop, step):
             yield i, self.frame_time_ms(i), self.frame(i)
 
+    def rssi_max(self, i: int, channel: int) -> Optional[float]:
+        """max(A, B) RSSI in dBm for one channel at frame i, without decoding the whole frame."""
+        a = self.frame_offsets[i]
+        n = self.data[a]
+        per = (self.frame_lengths[i] - 1) // n
+        pos = a + 1
+        for _ in range(n):
+            if self.data[pos] == channel:
+                ra, rb = struct.unpack_from("<hh", self.data, pos + 1)
+                return max(ra, rb) / 10
+            pos += per
+        return None
+
     def events_at(self, ms: int, slack_ms: int = 0) -> List[Event]:
         return [e for e in self.events if e.start_ms - slack_ms <= ms <= max(e.end_ms, e.start_ms) + slack_ms]
 

@@ -3,11 +3,12 @@
 Overlay Shure Wireless Workbench (WWB) Timeline telemetry on show video, in sync.
 Proof of concept, started 2026-10-11.
 
-Three parts:
+Four parts:
 
 1. `tline.py`: reference decoder for WWB Timeline recorder files (`.tline`). Stdlib only.
 2. `shw.py`: pulls receiver model, band, frequency and linked transmitter per channel out of a WWB show file (`.shw`).
 3. `player.html`: browser player. Drop a video, a `.tline` and optionally a `.shw` on it, set one sync anchor, and a translucent RF dashboard follows the video.
+4. `render.py`: renders that dashboard as an alpha overlay movie for Resolve, or burns it into a preview MP4.
 
 ## Quick start
 
@@ -32,6 +33,26 @@ python3 tline.py export data/bb.tline --shw data/bb.shw --out out/bb --step 10 -
 
 `export` writes `manifest.json` (channels, devices, frequencies, events, start time), `events.csv` and a long-format `samples.csv` (one row per channel per sample). The full 10 Hz export of a 4 h, 16 channel show is about 70 MB; `--step 10` gives 1 Hz.
 
+## Rendering an overlay for Resolve
+
+`render.py` draws the same dashboard as the player, one frame per video frame, and pipes it into ffmpeg as a movie with an alpha channel. Nothing is written to disk except the output.
+
+```bash
+# 60 s overlay starting 20:52.2 into the video, 1080p29.97, QuickTime Animation with alpha
+python3 render.py --tline data/bb.tline --shw data/bb.shw --start 20:52.2 --duration 60 --out out/overlay.mov
+
+# add a burned-in preview on the program video
+python3 render.py ... --burn-in data/bb.mp4 --burn-out out/preview.mp4
+
+# ProRes 4444, or a PNG sequence
+python3 render.py ... --codec prores --out out/overlay_prores.mov
+python3 render.py ... --codec png --out out/frames
+```
+
+Drop the `.mov` on a track above the program video at the same start time. The sync anchor flags (`--anchor-video`, `--anchor-wall`, `--trim`) are the same as the player's, and the defaults are the Banana Bowl values. `--size`, `--fps`, `--scale`, `--opacity`, `--side`, `--show-idle` and `--no-history` control the look.
+
+Speed and size on an M-series Mac at 1080p: about 90 frames per second, so a 4 h show renders in roughly 70 min. The Animation codec stays around 4 MB per 10 s because most of each frame is transparent; ProRes 4444 is roughly 40 MB per 10 s regardless of content.
+
 ## What the Timeline records
 
 Per channel, every 100 ms: RSSI for antennas A to D (tenths of a dBm), audio level (dB, 0 = clip), channel quality 0 to 5, battery bars 0 to 5, battery percent, receiver slot. Every 4 s the frame also carries the min and max per antenna for the window. A separate event log holds RF dropouts ("No RF Connection"), transmitter on/off, RF power and FD mode changes, each with start and end times to the millisecond. The file layout is documented at the top of `tline.py`.
@@ -46,5 +67,4 @@ Both sides carry absolute wall-clock anchors: the WWB recording start time, and 
 
 - Payload byte 16 is undecoded (moves in steps of 4 while a transmitter is on; probably the front-panel audio LED level). A short calibration recording with a transmitter at known gain and battery would settle it.
 - "Interference" events from the WWB UI have not been seen in a file yet.
-- No rendered-file output yet. Next step is rendering the same dashboard to an alpha overlay (ProRes 4444 or PNG sequence) for Resolve, or burning it into an MP4 with ffmpeg.
 - Future shows: the receivers can stream the same metering over Shure's TCP command protocol with real timestamps, which would make the `.tline` decoder a fallback rather than the main path.
