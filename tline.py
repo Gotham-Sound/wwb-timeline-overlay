@@ -25,8 +25,13 @@ Format (reverse-engineered from WWB 7.9 recordings, verified on two files):
               [11]   battery bars 0..5 (0 when no transmitter)
               [12]   receiver slot 0..3 (A..D)
               [13]   battery percent, 255 = no transmitter / unknown
-              [16]   unknown, changes in steps of 4 while a transmitter is on
-              other bytes constant in all samples seen
+              [16]   packed: bits 5-7 = ShowLink signal 0..5 (7 = no ShowLink), bits 2-4 = RF level
+                     bars 0..5 as on the receiver meter (7 = no signal), bits 0-1 unused. Verified
+                     against Tx Online/Offline events on a ShowLink-equipped recording and against
+                     RSSI bands (5 above about -65 dBm, 0 below about -88 dBm, with hysteresis).
+              [14] [15] [17] [18]  transmitter parameters that only arrive over ShowLink
+                     (0,0,0,1 with ShowLink; -4,-4,-32,-3 sentinels without). Meaning not yet mapped;
+                     [18] is probably the RF power index (1 = 10 mW in the one recording seen).
 
   Timestamps are LOCAL wall-clock time stored as if it were a UTC epoch (WWB labels them
   "UTC" in its own UI). Treat them as naive wall-clock values; do not convert time zones.
@@ -104,6 +109,8 @@ class Sample:
     bars: Optional[int]
     slot: int
     battery_pct: Optional[int]
+    rf_bars: Optional[int]     # receiver RF level meter 0..5
+    showlink: Optional[int]    # ShowLink signal 0..5, None without an access point
     raw16: int
     active: bool
 
@@ -123,6 +130,8 @@ def decode_payload(ch: int, p: bytes) -> Sample:
         bars=None if not active else bars,
         slot=slot,
         battery_pct=None if pct == NO_TX_BYTE else pct,
+        rf_bars=None if (p[16] >> 2) & 7 == 7 else (p[16] >> 2) & 7,
+        showlink=None if p[16] >> 5 == 7 else p[16] >> 5,
         raw16=p[16],
         active=active,
     )
@@ -320,7 +329,8 @@ def cmd_dump(args):
         if s.active or args.all:
             print(f"  {s.channel:2d} {name:10s} A {s.rssi[0]:6.1f}  B {s.rssi[1]:6.1f}  audio {s.audio_db:4d} dB"
                   f"  Q {s.quality if s.quality is not None else '-'}  bars {s.bars if s.bars is not None else '-'}"
-                  f"  batt {s.battery_pct if s.battery_pct is not None else '-'}%  raw16 {s.raw16}")
+                  f"  batt {s.battery_pct if s.battery_pct is not None else '-'}%"
+                  f"  rf-bars {s.rf_bars if s.rf_bars is not None else '-'}  showlink {s.showlink if s.showlink is not None else '-'}")
     ev = t.events_at(ms, slack_ms=args.slack * 1000)
     for e in ev:
         print(f"  event {wall_clock(e.start_ms).time()} {e.type} {e.channel_name}: {e.description}")
@@ -344,7 +354,7 @@ def cmd_export(args):
     with open(os.path.join(args.out, "samples.csv"), "w", newline="") as f:
         w = csv.writer(f)
         w.writerow(["frame", "wall", "channel", "name", "rssi_a", "rssi_b", "rssi_c", "rssi_d",
-                    "audio_db", "quality", "bars", "battery_pct", "active"])
+                    "audio_db", "quality", "bars", "battery_pct", "rf_bars", "showlink", "active"])
         for i, ms, samples in t.iter_frames(step=args.step):
             wall = wall_clock(ms).isoformat(timespec="milliseconds")
             for s in samples:
@@ -353,7 +363,8 @@ def cmd_export(args):
                 c = t.by_number.get(s.channel)
                 w.writerow([i, wall, s.channel, c.name if c else "", *s.rssi, s.audio_db,
                             "" if s.quality is None else s.quality, "" if s.bars is None else s.bars,
-                            "" if s.battery_pct is None else s.battery_pct, int(s.active)])
+                            "" if s.battery_pct is None else s.battery_pct,
+                            "" if s.rf_bars is None else s.rf_bars, "" if s.showlink is None else s.showlink, int(s.active)])
                 n += 1
     print(f"wrote {args.out}/manifest.json, events.csv ({len(t.events)} events), samples.csv ({n} rows)")
 
