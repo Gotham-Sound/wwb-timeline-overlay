@@ -191,7 +191,7 @@ class PanelRenderer:
             sub = f"{c.frequency_khz / 1000:.3f}" + (f" {c.tx_name}" if c.tx_name else "")
         else:
             sub = c.tx_name or c.group
-        d.text((x, y + 27 * sc), sub[:13], font=font("mono", 9.5 * sc), fill=SUBTEXT, anchor="ls")
+        d.text((x, y + 27 * sc), sub[:13], font=font("mono", 8.5 * sc), fill=SUBTEXT, anchor="ls")
         # RSSI bars
         bx, bw, bh = x + 78 * sc, 82 * sc, 6 * sc
         for label, v, yy in (("A", s.rssi[0], y + 6 * sc), ("B", s.rssi[1], y + 19 * sc)):
@@ -236,6 +236,7 @@ class PanelRenderer:
                 pts.append((hx + hw * k / n, hy + hh * (1 - max(0.0, min(1.0, (v + 120) / 100)))))
             if len(pts) > 1:
                 d.line(pts, fill=rgba("9fd3ff") if s.active else rgba("555555"), width=max(1, int(1.2 * sc)))
+            d.text((hx + 2 * sc, y + 32 * sc), "RF 20s", font=font("mono", 8.5 * sc), fill=DIMTEXT, anchor="ls")
             t0 = wall - 20000
             for e in reversed(self.by_channel.get(c.number, [])):
                 if e.start_ms < t0 - 2000:

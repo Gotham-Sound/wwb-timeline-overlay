@@ -352,7 +352,7 @@ function drawRow(c, s, x, y, w, h, sc, wall, frame) {
   // name + frequency
   ctx.fillStyle = '#f2f6fa'; ctx.font = `600 ${12.5 * sc}px -apple-system, Helvetica, Arial`;
   ctx.fillText(c.name, x, y + 14 * sc);
-  ctx.fillStyle = '#8fa3b8'; ctx.font = `${9.5 * sc}px ui-monospace, Menlo, monospace`;
+  ctx.fillStyle = '#8fa3b8'; ctx.font = `${8.5 * sc}px ui-monospace, Menlo, monospace`;
   const sub = c.freqKhz ? (c.freqKhz / 1000).toFixed(3) + (c.tx ? ' ' + c.tx : '') : (c.tx || c.group);
   ctx.fillText(sub.length > 13 ? sub.slice(0, 13) : sub, x, y + 27 * sc);
   // RSSI bars A / B
@@ -397,6 +397,7 @@ function drawRow(c, s, x, y, w, h, sc, wall, frame) {
       started ? ctx.lineTo(px, py) : ctx.moveTo(px, py); started = true;
     }
     ctx.strokeStyle = s.active ? '#9fd3ff' : '#555'; ctx.lineWidth = 1.2 * sc; ctx.stroke();
+    ctx.fillStyle = '#6b7c8f'; ctx.font = `${8.5 * sc}px ui-monospace, Menlo, monospace`; ctx.fillText('RF 20s', hx + 2 * sc, y + 32 * sc);
     const list = tl.eventsByChannel.get(c.number) || [];
     const t0 = wall - 20000;
     for (let i = list.length - 1; i >= 0 && list[i].startMs > t0 - 2000; i--) {
