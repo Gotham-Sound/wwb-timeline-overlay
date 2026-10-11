@@ -82,6 +82,15 @@ Drop the `.mov` on a track above the program video at the same start time. The s
 
 Speed and size on an M-series Mac at 1080p: about 90 frames per second, so a 4 h show renders in roughly 70 min. The Animation codec stays around 4 MB per 10 s because most of each frame is transparent; ProRes 4444 is roughly 40 MB per 10 s regardless of content.
 
+## Audio sanity check
+
+`audiocheck.py` correlates the program audio of a video segment (mono float PCM from ffmpeg, 100 ms RMS windows) with the WWB audio meter of each live channel, sweeping the lag. It answers two questions: does the meter track what you hear, and is the telemetry in sync. On the Banana Bowl, RF 05 and RF 06 correlate at r = 0.47 and 0.38 with a best lag of -0.3 s over 19:30 to 19:40, which confirms the countdown anchor to a few tenths. Expect weak correlation elsewhere: a broadcast mix is compressed and dominated by sources that aren't on these receivers, and the meter measures each mic's own input whether or not the mixer opened it. Use 10-minute windows; 60 s windows with long lag sweeps produce spurious peaks.
+
+```bash
+ffmpeg -ss 3892.2 -t 600 -i data/bb_720p.mp4 -vn -ac 1 -ar 8000 -f f32le out/seg.f32
+python3 audiocheck.py --tline data/bb.tline --shw data/bb.shw --pcm out/seg.f32 --start 1:04:52.2 --max-lag 5
+```
+
 ## What the Timeline records
 
 Per channel, every 100 ms: RSSI for antennas A to D (tenths of a dBm), audio level (dB, 0 = clip), channel quality 0 to 5, battery bars 0 to 5, battery percent, receiver slot, the receiver's RF level meter 0 to 5, and the ShowLink signal 0 to 5 when an access point is present. Every 4 s the frame also carries the min and max per antenna for the window. A separate event log holds RF dropouts ("No RF Connection"), transmitter on/off, RF power and FD mode changes, each with start and end times to the millisecond. The file layout is documented at the top of `tline.py`.
