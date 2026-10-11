@@ -40,6 +40,8 @@ enum RenderError: Error, LocalizedError {
 }
 
 final class Renderer {
+    /// Fraction done (0...1), called from the render thread.
+    var onFraction: ((Double) -> Void)?
     static let rec709: [String: Any] = [AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_709_2,
                                         AVVideoTransferFunctionKey: AVVideoTransferFunction_ITU_R_709_2,
                                         AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_709_2]
@@ -49,6 +51,10 @@ final class Renderer {
 
     /// Blocking. Call on a background queue; progress is called on that queue.
     func run(_ job: RenderJob, progress: @escaping (String) -> Void) throws {
+        // Keep the app out of App Nap and the machine awake: rendering from a background window
+        // otherwise runs at a fraction of the speed.
+        let activity = ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .idleSystemSleepDisabled], reason: "Rendering overlay")
+        defer { ProcessInfo.processInfo.endActivity(activity) }
         let tl = try Timeline(url: job.tlineURL)
         if let s = job.shwURL { try tl.applyShow(url: s) }
         guard let anchorWallMs = WallClock.parse(job.anchorWall, dayOf: tl.startMs) else { throw RenderError.badAnchor }
@@ -109,7 +115,10 @@ final class Renderer {
             guard adaptor.append(pb, withPresentationTime: pts) else {
                 throw RenderError.writer(writer.error?.localizedDescription ?? "append")
             }
-            if n % 30 == 0 { progress("\(n + 1)/\(nFrames)  \(WallClock.format(wall))") }
+            if n % 30 == 0 {
+                progress("\(n + 1)/\(nFrames)  \(WallClock.format(wall))")
+                onFraction?(Double(n + 1) / Double(nFrames) * (job.burnIn != nil ? 0.5 : 1.0))
+            }
         }
         input.markAsFinished()
         let sem = DispatchSemaphore(value: 0)
@@ -193,7 +202,10 @@ final class Renderer {
                 } catch { failure = error }
                 if failure != nil { vin.markAsFinished(); group.leave(); return }
                 frames += 1
-                if frames % 30 == 0 { progress(String(format: "Preview %.0f%%  %@", 100 * (t - job.start) / total, WallClock.format(wallAt(t)))) }
+                if frames % 30 == 0 {
+                    progress(String(format: "Preview %.0f%%  %@", 100 * (t - job.start) / total, WallClock.format(wallAt(t))))
+                    self.onFraction?(0.5 + 0.5 * min(1, (t - job.start) / total))
+                }
             }
         }
         if let ain = ain, let aout = aout {

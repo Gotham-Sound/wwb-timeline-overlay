@@ -460,6 +460,17 @@ async function loadUrls(spec) {
   status();
 }
 window.wwbLoad = loadUrls;
+// Jump to a video time (seconds) or a WWB wall-clock time ("HH:MM:SS[.f]") via the sync anchor.
+window.wwbSeek = (spec) => {
+  if (spec.video !== undefined) { video.currentTime = Math.max(0, spec.video); return true; }
+  if (spec.wall && tl) {
+    const av = parseClock(opts.anchorVideo), aw = parseClock(opts.anchorWall), w = parseClock(spec.wall);
+    if ([av, aw, w].some(isNaN)) return false;
+    video.currentTime = Math.max(0, av + (w - aw) - opts.trim);
+    return true;
+  }
+  return false;
+};
 function loadFromQuery() {
   const q = new URLSearchParams(location.search);
   const spec = {}; for (const k of ['video', 'tline', 'shw']) if (q.get(k)) spec[k] = q.get(k);

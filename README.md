@@ -12,6 +12,8 @@ Five parts:
 4. `render.py`: renders that dashboard as an alpha overlay movie for Resolve, or burns it into a preview MP4.
 5. `app/`: a native Mac app around the player with its own renderer (drop files on the window, File > Render Overlay). No Python or ffmpeg needed.
 
+**[Read the manual](docs/manual.md)** for the app, with screenshots: install, getting the files out of Wireless Workbench, setting the sync anchor, reading the dashboard, rendering for your editor, troubleshooting.
+
 ## Quick start
 
 Open `player.html` in a browser (double-click works, no server needed), drop the three files on it, and set the anchor: a video time you can identify (for example the moment a countdown hits zero) and the wall-clock time of that moment as WWB shows it. Use the Trim field, or the `,` and `.` keys, to nudge by 0.1 s while watching a mic being switched on.

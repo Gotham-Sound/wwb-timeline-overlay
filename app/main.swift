@@ -137,6 +137,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
     var renderer: Renderer?
     var progressPanel: NSPanel?
     var progressLabel: NSTextField?
+    var progressBar: NSProgressIndicator?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         buildMenu()
@@ -233,6 +234,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
 
     @objc func reloadPlayer(_ sender: Any?) { loadPlayer() }
 
+    @objc func goToTime(_ sender: Any?) {
+        let videoField = NSTextField(string: "")
+        videoField.placeholderString = "m:ss.s or h:mm:ss"
+        let wallField = NSTextField(string: "")
+        wallField.placeholderString = "HH:MM:SS as WWB shows it"
+        let grid = NSGridView(views: [[NSTextField(labelWithString: "Video time"), videoField],
+                                      [NSTextField(labelWithString: "or wall clock"), wallField]])
+        grid.rowSpacing = 8; grid.columnSpacing = 10; grid.column(at: 0).xPlacement = .trailing
+        for f in [videoField, wallField] { f.widthAnchor.constraint(equalToConstant: 200).isActive = true }
+        grid.frame = NSRect(x: 0, y: 0, width: 320, height: 64)
+        let a = NSAlert()
+        a.messageText = "Go to Time"
+        a.informativeText = "Jump the video to a time, or to a WWB wall-clock time through the sync anchor."
+        a.accessoryView = grid
+        a.addButton(withTitle: "Go"); a.addButton(withTitle: "Cancel")
+        a.window.initialFirstResponder = videoField
+        guard a.runModal() == .alertFirstButtonReturn else { return }
+        let v = videoField.stringValue.trimmingCharacters(in: .whitespaces)
+        let w = wallField.stringValue.trimmingCharacters(in: .whitespaces)
+        var js = ""
+        if !v.isEmpty, let t = WallClock.parseVideoTime(v) { js = "wwbSeek({video: \(t)})" }
+        else if !w.isEmpty, let d = try? JSONSerialization.data(withJSONObject: ["wall": w]), let j = String(data: d, encoding: .utf8) { js = "wwbSeek(\(j))" }
+        guard !js.isEmpty else { return }
+        webView.evaluateJavaScript(js) { result, _ in
+            if (result as? Bool) == false { self.alert("Could not jump there. Load a .tline and set the anchor first for wall-clock times.") }
+        }
+    }
+
     // --- render
     @objc func renderOverlay(_ sender: Any?) {
         guard let tline = files["tline"] else { alert("Load a .tline recording first."); return }
@@ -320,6 +349,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
         let renderer = Renderer()
         self.renderer = renderer
         showProgress(title: "Rendering " + out.lastPathComponent)
+        renderer.onFraction = { [weak self] f in DispatchQueue.main.async { self?.progressBar?.doubleValue = f * 100 } }
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             var failure: Error?
             do {
@@ -349,12 +379,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
         label.frame = NSRect(x: 20, y: 70, width: 420, height: 20)
         label.lineBreakMode = .byTruncatingMiddle
         let bar = NSProgressIndicator(frame: NSRect(x: 20, y: 44, width: 420, height: 16))
-        bar.style = .bar; bar.isIndeterminate = true; bar.startAnimation(nil)
+        bar.style = .bar; bar.isIndeterminate = false; bar.minValue = 0; bar.maxValue = 100; bar.doubleValue = 0
         let cancel = NSButton(title: "Cancel", target: self, action: #selector(cancelRender(_:)))
         cancel.frame = NSRect(x: 360, y: 8, width: 80, height: 28)
         panel.contentView?.addSubview(label); panel.contentView?.addSubview(bar); panel.contentView?.addSubview(cancel)
         panel.center(); panel.makeKeyAndOrderFront(nil)
-        progressPanel = panel; progressLabel = label
+        progressPanel = panel; progressLabel = label; progressBar = bar
     }
 
     @objc func cancelRender(_ sender: Any?) { renderer?.cancelled = true }
@@ -383,6 +413,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
         let fileItem = NSMenuItem(); main.addItem(fileItem)
         let fileMenu = NSMenu(title: "File"); fileItem.submenu = fileMenu
         fileMenu.addItem(withTitle: "Open…", action: #selector(openDocument(_:)), keyEquivalent: "o")
+        fileMenu.addItem(withTitle: "Go to Time…", action: #selector(goToTime(_:)), keyEquivalent: "g")
         fileMenu.addItem(withTitle: "Render Overlay…", action: #selector(renderOverlay(_:)), keyEquivalent: "r")
         fileMenu.addItem(.separator())
         let reload = fileMenu.addItem(withTitle: "Reload Player", action: #selector(reloadPlayer(_:)), keyEquivalent: "r")
